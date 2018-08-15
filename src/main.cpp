@@ -80,6 +80,12 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 // Variables for whole scope
+
+// Variables for whole scope
+int timeout = 10000;
+long KeyTimer = 0;
+String CurrentInput = "";
+
 const char *http_username = "admin";
 char *http_pass = NULL;
 unsigned long previousMillis = 0;
@@ -662,13 +668,47 @@ void ICACHE_FLASH_ATTR rfidloop()
     {
         if (wg.available())
         {
-#ifdef DEBUG
-            Serial.print(F("[ INFO ] PICC's UID: "));
-            Serial.println(wg.getCode());
-#endif
-            uid = String(wg.getCode(), DEC);
-            type = String(wg.getWiegandType(), DEC);
+          // Detect Wiegand26 and Wiegand34 keyfob
+          if (String(wg.getWiegandType()) == "26" || String(wg.getWiegandType()) == "34")
+          {
+            #ifdef DEBUG
+              Serial.print(F("[ INFO ] PICC's UID: "));
+              Serial.println(wg.getCode());
+            #endif
+              uid = String(wg.getCode(), DEC);
+              type = String(wg.getWiegandType(), DEC);
+              cooldown = millis() + 2000;
+          }
+
+          // keypad stuff
+          // When * is pressed start keytimer to capture code
+          if (String(wg.getWiegandType()) == "4" && String(wg.getCode(), HEX) == "1b")
+          {
+            CurrentInput = "";
+            KeyTimer = millis();
+          }
+
+          // When key is pressed AND timer is running AND key is not * or #
+          // Then add key to the current input
+          if (String(wg.getWiegandType()) == "4" && KeyTimer > 0 && String(wg.getCode(), HEX) != "d"  && String(wg.getCode(), HEX) != "1b")
+          {
+            CurrentInput = CurrentInput + String(wg.getCode());
+            KeyTimer = millis();
+          }
+
+          // When # is pressed stop keytimer to capture code
+          if (String(wg.getWiegandType()) == "4" && KeyTimer > 0 && String(wg.getCode(), HEX) == "d")
+          {
+            #ifdef DEBUG
+              Serial.print(F("[ INFO ] PICC's UID: "));
+              Serial.println(CurrentInput);
+            #endif
+            uid = CurrentInput;
+            type = "PIN";
+            CurrentInput = "";
+            KeyTimer = 0;
             cooldown = millis() + 2000;
+          }
         }
         else
         {
@@ -714,13 +754,47 @@ void ICACHE_FLASH_ATTR rfidloop()
 #ifdef OFFICIALBOARD
     if (wg.available())
     {
-#ifdef DEBUG
-        Serial.print(F("[ INFO ] PICC's UID: "));
-        Serial.print(wg.getCode());
-#endif
-        uid = String(wg.getCode(), DEC);
-        type = String(wg.getWiegandType(), HEX);
+      // Detect Wiegand26 and Wiegand34 keyfob
+      if (String(wg.getWiegandType()) == "26" || String(wg.getWiegandType()) == "34")
+      {
+        #ifdef DEBUG
+          Serial.print(F("[ INFO ] PICC's UID: "));
+          Serial.println(wg.getCode());
+        #endif
+          uid = String(wg.getCode(), DEC);
+          type = String(wg.getWiegandType(), DEC);
+          cooldown = millis() + 2000;
+      }
+
+      // keypad stuff
+      // When * is pressed start keytimer to capture code
+      if (String(wg.getWiegandType()) == "4" && String(wg.getCode(), HEX) == "1b")
+      {
+        CurrentInput = "";
+        KeyTimer = millis();
+      }
+
+      // When key is pressed AND timer is running AND key is not * or #
+      // Then add key to the current input
+      if (String(wg.getWiegandType()) == "4" && KeyTimer > 0 && String(wg.getCode(), HEX) != "d"  && String(wg.getCode(), HEX) != "1b")
+      {
+        CurrentInput = CurrentInput + String(wg.getCode());
+        KeyTimer = millis();
+      }
+
+      // When # is pressed stop keytimer to capture code
+      if (String(wg.getWiegandType()) == "4" && KeyTimer > 0 && String(wg.getCode(), HEX) == "d")
+      {
+        #ifdef DEBUG
+          Serial.print(F("[ INFO ] PICC's UID: "));
+          Serial.println(CurrentInput);
+        #endif
+        uid = CurrentInput;
+        type = "PIN";
+        CurrentInput = "";
+        KeyTimer = 0;
         cooldown = millis() + 2000;
+      }
     }
     else
     {
@@ -1632,6 +1706,15 @@ void ICACHE_RAM_ATTR loop()
             enableWifi();
         }
     }
+
+    // Keep an eye on timeout waiting for keypress after starting with a *
+    // Clear code and timer when timeout is reached
+    if (KeyTimer > 0 && millis() - KeyTimer >= timeout)
+    {
+      KeyTimer = 0;
+      CurrentInput = "";
+    }
+
     // Another loop for RFID Events, since we are using polling method instead of Interrupt we need to check RFID hardware for events
     if (currentMillis >= cooldown)
     {
